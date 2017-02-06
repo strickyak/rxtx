@@ -1,10 +1,11 @@
 /* Routines for receiving & transmitting & processing audio.
-*/
+ */
 package rxtx
 
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -42,19 +43,6 @@ type Station struct {
 	Latest time.Time // Latest time from this station.
 	Seq    byte      // Latest sequence from this station.
 	Addr   *net.UDPAddr
-}
-
-func (e *Engine) MarkStation(h *Header, addr *net.UDPAddr) {
-	st, ok := e.Stations[h.Source]
-	if !ok {
-		st = &Station{
-			Id: h.Source,
-		}
-		e.Stations[h.Source] = st
-	}
-	st.Latest = time.Now()
-	st.Seq = 0
-	st.Addr = addr
 }
 
 type Socket struct {
@@ -129,16 +117,16 @@ func (e *Engine) ForgeHeader() *Header {
 	return h
 }
 
-func (e *Engine) WritePacket(h *Header, b []byte, dest *net.UDPAddr) {
-	h.Length = SamplesPerPacket
+func (e *Engine) WritePacket(h *Header, segment []byte, dest *net.UDPAddr) {
+	h.Length = int16(len(segment))
 	sz := binary.Size(h)
-	z := make([]byte, sz+len(b))
+	z := make([]byte, sz+len(segment))
 	w := bytes.NewBuffer(z)
 	err := binary.Write(w, ENDIAN, h)
 	if err != nil {
 		panic(err)
 	}
-	copy(z[sz:], b)
+	copy(z[sz:], segment)
 
 	n, err := e.Sock.Conn.WriteToUDP(z, dest)
 
@@ -150,15 +138,17 @@ func (e *Engine) WritePacket(h *Header, b []byte, dest *net.UDPAddr) {
 	}
 }
 
-func (e *Engine) ReadPacket(b []byte) *Header {
+func (e *Engine) ReadPacket(segment []byte) *Header {
 	packet := make([]byte, 1024)
-	size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
+	size, _, err := e.Sock.Conn.ReadFromUDP(packet)
 	if err != nil {
 		panic(err)
 	}
+	println("size", size)
 
 	h := new(Header)
 	hSize := binary.Size(h)
+	println("hSize", hSize)
 	if hSize < 0 {
 		panic("hSize")
 	}
@@ -172,19 +162,25 @@ func (e *Engine) ReadPacket(b []byte) *Header {
 	if err != nil {
 		panic(err)
 	}
-	e.MarkStation(h, addr)
+	// e.MarkStation(h, addr)
 
 	// TODO: Authenticate.
 	actualPayload := int(size) - hSize
-	if int(size)-hSize != int(h.Length) {
-		Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
-	}
-
-	if h.Length > 0 {
-		if h.Length != SamplesPerPacket {
-			Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
+	println("actualPayload", actualPayload)
+	fmt.Printf("%#v\n", *h)
+	/*
+		if actualPayload != int(h.Length) {
+			Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
 		}
-	}
+
+		if h.Length > 0 {
+			if h.Length != SamplesPerPacket {
+				Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
+			}
+		}
+	*/
+
+	copy(segment, packet[hSize:])
 
 	return h
 }
@@ -201,31 +197,62 @@ func (e *Engine) Transmit() {
 	log.Fatalf("obsolete")
 }
 
-func (e *Engine) Human() {
-	ptt := new(PushToTalk)
-	go ptt.Run()
-	e.RunSendAudio(ptt)
-	/*
-		for {
-		  if ptt.Active() {
-		    print("Y")
-		  } else {
-		    print(".")
-		  }
-		  time.Sleep(time.Second / 10)
+func (e *Engine) ProxyCommand() {
+	packet := make([]byte, 1024)
+	pals := make(map[string]*net.UDPAddr)
+	for {
+		size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
+		if err != nil {
+			panic(err)
 		}
-	*/
+
+		whom := addr.String()
+		pals[whom] = addr
+
+		for w, a := range pals {
+			if w != whom || w == whom {
+				_, err := e.Sock.Conn.WriteToUDP(packet[:size], a)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
 }
 
-func (e *Engine) SendToProxy(buf []byte) {
+func (e *Engine) HumanCommand() {
+	ptt := new(PushToTalk)
+	go ptt.Run()
+	go e.RunReceiveAudio()
+	e.RunSendAudio(ptt)
+}
+
+func (e *Engine) RunReceiveAudio() {
+	segment := make([]byte, SamplesPerPacket)
+	for {
+		h := e.ReadPacket(segment)
+		if h.Length > 0 {
+			n, err := e.Audio.Write(segment)
+			if err != nil {
+				panic(err)
+			}
+			if n != SamplesPerPacket {
+				log.Panicf("e.Audio.Write wrote %d bytes, wanted %d", n, SamplesPerPacket)
+				os.Exit(13)
+			}
+		}
+	}
+}
+
+func (e *Engine) SendToProxy(segment []byte) {
 	h := e.ForgeHeader()
-	e.WritePacket(h, buf, e.ProxyAddr)
+	e.WritePacket(h, segment, e.ProxyAddr)
 }
 
 func (e *Engine) RunSendAudio(ptt *PushToTalk) {
-	buf := make([]byte, SamplesPerPacket)
+	segment := make([]byte, SamplesPerPacket)
 	for {
-		n, err := e.Audio.Read(buf)
+		n, err := e.Audio.Read(segment)
 		if err != nil {
 			panic(err)
 		}
@@ -234,7 +261,7 @@ func (e *Engine) RunSendAudio(ptt *PushToTalk) {
 			os.Exit(13)
 		}
 		if ptt.Active() {
-			e.SendToProxy(buf)
+			e.SendToProxy(segment)
 			print(":")
 		} else {
 			print(".")

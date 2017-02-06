@@ -25,10 +25,11 @@ func main() {
 		e.InitAudio(*audio)
 		e.Transmit()
 	//case "T": e.Receive()
-	//case "p": e.Proxy()
+	case "p":
+		e.ProxyCommand()
 	case "h":
 		e.InitAudio(*audio)
-		e.Human()
+		e.HumanCommand()
 	//case "r": e.Radio()
 	default:
 		panic(*cmd)
