@@ -120,12 +120,13 @@ func (e *Engine) ForgeHeader() *Header {
 func (e *Engine) WritePacket(h *Header, segment []byte, dest *net.UDPAddr) {
 	h.Length = int16(len(segment))
 	sz := binary.Size(h)
-	z := make([]byte, sz+len(segment))
-	w := bytes.NewBuffer(z)
+	w := bytes.NewBuffer(nil)
 	err := binary.Write(w, ENDIAN, h)
 	if err != nil {
 		panic(err)
 	}
+	z := make([]byte, sz+len(segment))
+	copy(z[:sz], w.String())
 	copy(z[sz:], segment)
 
 	n, err := e.Sock.Conn.WriteToUDP(z, dest)
@@ -139,7 +140,7 @@ func (e *Engine) WritePacket(h *Header, segment []byte, dest *net.UDPAddr) {
 }
 
 func (e *Engine) ReadPacket(segment []byte) *Header {
-	packet := make([]byte, 1024)
+	packet := make([]byte, 512)
 	size, _, err := e.Sock.Conn.ReadFromUDP(packet)
 	if err != nil {
 		panic(err)
@@ -197,21 +198,39 @@ func (e *Engine) Transmit() {
 	log.Fatalf("obsolete")
 }
 
+func ShowBytes(bb []byte) string {
+	z := bytes.NewBufferString("[")
+	prev := -1
+	for _, e := range bb {
+		if int(e) == prev {
+			z.WriteRune('*')
+		} else {
+			fmt.Fprintf(z, "%d,", e)
+		}
+		prev = int(e)
+	}
+	z.WriteRune(']')
+	return z.String()
+}
+
 func (e *Engine) ProxyCommand() {
-	packet := make([]byte, 1024)
+	packet := make([]byte, 512)
 	pals := make(map[string]*net.UDPAddr)
 	for {
 		size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
 		if err != nil {
 			panic(err)
 		}
+		// println("PROXY GOT", size, addr, ShowBytes(packet[:20]))
 
 		whom := addr.String()
 		pals[whom] = addr
 
 		for w, a := range pals {
 			if w != whom || w == whom {
-				_, err := e.Sock.Conn.WriteToUDP(packet[:size], a)
+				out := packet[:size]
+				_, err := e.Sock.Conn.WriteToUDP(out, a)
+				// println("PROXY WROTE", n, a, ShowBytes(out))
 				if err != nil {
 					panic(err)
 				}
