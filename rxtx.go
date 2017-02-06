@@ -1,5 +1,4 @@
-/*
-   Routines for receiving & transmitting & processing audio.
+/* Routines for receiving & transmitting & processing audio.
 */
 package rxtx
 
@@ -31,18 +30,31 @@ type Header struct {
 	Version int16
 	Length  int16
 	Time    int32
-	Seq    byte
-	Flags  byte
-	Source byte
-	Dest   byte
+	Seq     byte
+	Flags   byte
+	Source  byte
+	Dest    byte
 	// TODO -- authenticate after payload.
 }
 
 type Station struct {
-	Id byte
-	// Time time.Time   // Latest time from this station.
-	// Seq  byte        // Latest sequence from this station.
-	Addr *net.UDPAddr
+	Id     byte
+	Latest time.Time // Latest time from this station.
+	Seq    byte      // Latest sequence from this station.
+	Addr   *net.UDPAddr
+}
+
+func (e *Engine) MarkStation(h *Header, addr *net.UDPAddr) {
+	st, ok := e.Stations[h.Source]
+	if !ok {
+		st = &Station{
+			Id: h.Source,
+		}
+		e.Stations[h.Source] = st
+	}
+	st.Latest = time.Now()
+	st.Seq = 0
+	st.Addr = addr
 }
 
 type Socket struct {
@@ -57,16 +69,21 @@ type Engine struct {
 	Stations map[byte]*Station
 	// PrevSecs int
 	// PrevSeq  int
-	Sock *Socket
-	Peer *Station
-	Audio *Audio
+	Sock      *Socket
+	ProxyAddr *net.UDPAddr
+	Audio     *os.File
 }
 
-func NewEngine(me int) *Engine {
-  return &Engine {
-    Me: me,
-    Stations: make(map[byte]*Station),
-  }
+func NewEngine(me int, proxyAddrString string) *Engine {
+	a, err := net.ResolveUDPAddr("udp", proxyAddrString)
+	if err != nil {
+		panic(err)
+	}
+	return &Engine{
+		Me:        me,
+		Stations:  make(map[byte]*Station),
+		ProxyAddr: a,
+	}
 }
 
 func (e *Engine) RegisterStation(id byte, addr string) *Station {
@@ -75,7 +92,7 @@ func (e *Engine) RegisterStation(id byte, addr string) *Station {
 		panic(err)
 	}
 	station := &Station{
-		Id: id,
+		Id:   id,
 		Addr: a,
 	}
 	e.Stations[id] = station
@@ -112,32 +129,30 @@ func (e *Engine) ForgeHeader() *Header {
 	return h
 }
 
-func (e *Engine) WritePacket(h *Header, b []byte) {
-	// now := time.Now().Unix()
+func (e *Engine) WritePacket(h *Header, b []byte, dest *net.UDPAddr) {
+	h.Length = SamplesPerPacket
 	sz := binary.Size(h)
-	z := make([]byte, sz + len(b))
+	z := make([]byte, sz+len(b))
 	w := bytes.NewBuffer(z)
 	err := binary.Write(w, ENDIAN, h)
 	if err != nil {
 		panic(err)
 	}
 	copy(z[sz:], b)
-	station, ok := e.Stations[h.Dest]
-	if !ok {
-	  log.Panicf("WritePacket: station not registered: %d", h.Dest)
-	}
-	n, err := e.Sock.Conn.WriteToUDP(z, station.Addr)
+
+	n, err := e.Sock.Conn.WriteToUDP(z, dest)
+
 	if err != nil {
-	  log.Panicf("WritePacket: Cannot WriteToUDP: %v", err)
+		log.Panicf("WritePacket: Cannot WriteToUDP: %v", err)
 	}
 	if n != len(z) {
-	  log.Panicf("WritePacket: Wrote %d bytes, expected %d", n, len(z))
+		log.Panicf("WritePacket: Wrote %d bytes, expected %d", n, len(z))
 	}
 }
 
-func (e *Engine) ReadPacket(b []byte) (*Header, *Station) {
-	b = make([]byte, 1024)
-	size, addr, err := e.Sock.Conn.ReadFromUDP(b)
+func (e *Engine) ReadPacket(b []byte) *Header {
+	packet := make([]byte, 1024)
+	size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
 	if err != nil {
 		panic(err)
 	}
@@ -152,11 +167,12 @@ func (e *Engine) ReadPacket(b []byte) (*Header, *Station) {
 		panic(size)
 	}
 
-	r := bytes.NewReader(b)
+	r := bytes.NewReader(packet)
 	err = binary.Read(r, binary.BigEndian, h)
 	if err != nil {
 		panic(err)
 	}
+	e.MarkStation(h, addr)
 
 	// TODO: Authenticate.
 	actualPayload := int(size) - hSize
@@ -164,29 +180,88 @@ func (e *Engine) ReadPacket(b []byte) (*Header, *Station) {
 		Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
 	}
 
-	station, ok := e.Stations[h.Source]
-	if !ok {
-		station := &Station{
-			Id: h.Source,
-			Addr: addr,
+	if h.Length > 0 {
+		if h.Length != SamplesPerPacket {
+			Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
 		}
-		e.Stations[h.Source] = station
 	}
 
-	return h, station
-}
-
-type Audio struct {
-  File *os.File
+	return h
 }
 
 func (e *Engine) InitAudio(path string) {
-  fd, err := os.OpenFile(path, os.O_RDWR, 0666)
-  if err != nil { panic(err) }
-  e.Audio = &Audio{
-    File: fd,
-  }
+	audio, err := os.OpenFile(path, os.O_RDWR, 0666)
+	if err != nil {
+		panic(err)
+	}
+	e.Audio = audio
 }
 
 func (e *Engine) Transmit() {
+	log.Fatalf("obsolete")
+}
+
+func (e *Engine) Human() {
+	ptt := new(PushToTalk)
+	go ptt.Run()
+	e.RunSendAudio(ptt)
+	/*
+		for {
+		  if ptt.Active() {
+		    print("Y")
+		  } else {
+		    print(".")
+		  }
+		  time.Sleep(time.Second / 10)
+		}
+	*/
+}
+
+func (e *Engine) SendToProxy(buf []byte) {
+	h := e.ForgeHeader()
+	e.WritePacket(h, buf, e.ProxyAddr)
+}
+
+func (e *Engine) RunSendAudio(ptt *PushToTalk) {
+	buf := make([]byte, SamplesPerPacket)
+	for {
+		n, err := e.Audio.Read(buf)
+		if err != nil {
+			panic(err)
+		}
+		if n != SamplesPerPacket {
+			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, SamplesPerPacket)
+			os.Exit(13)
+		}
+		if ptt.Active() {
+			e.SendToProxy(buf)
+			print(":")
+		} else {
+			print(".")
+		}
+	}
+}
+
+type PushToTalk struct {
+	LastEnter time.Time
+}
+
+var enterToTalkBuf = make([]byte, 2)
+
+func (o *PushToTalk) Active() bool {
+	return o.LastEnter.Add(time.Second).After(time.Now())
+}
+func (o *PushToTalk) Run() {
+	for {
+		n, err := os.Stdin.Read(enterToTalkBuf)
+		if n < 1 {
+			println("os.Stdin.Read < 1")
+			os.Exit(0)
+		}
+		if err != nil {
+			println("os.Stdin.Read --> err")
+			os.Exit(2)
+		}
+		o.LastEnter = time.Now()
+	}
 }
