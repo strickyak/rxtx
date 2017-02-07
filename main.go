@@ -1,5 +1,9 @@
 // +build main
 
+// sudo ufw allow 44144/udp
+// ./rxtx-200 --bind=:44144 --cmd=p
+// go run main.go --proxy=xxxxx.yyy.zed:44144
+
 package main
 
 import (
@@ -10,7 +14,7 @@ import (
 	. "github.com/strickyak/rxtx"
 )
 
-var bind = flag.String("bind", "localhost:1500", "port to bind to")
+var bind = flag.String("bind", ":44144", "port to bind to")
 var proxy = flag.String("proxy", "forth.yak.net:1500", "proxy to use")
 var me = flag.Int("me", 1, "my ID")
 var cmd = flag.String("cmd", "h", "what to do")
@@ -21,16 +25,18 @@ func main() {
 	e := NewEngine(*me, *proxy)
 	e.InitSocket(*bind)
 	switch *cmd {
-	case "T":
-		e.InitAudio(*audio)
-		e.Transmit()
-	//case "T": e.Receive()
-	case "p":
+
+	case "p": // proxy
 		e.ProxyCommand()
-	case "h":
+
+	case "h": // human
 		e.InitAudio(*audio)
 		e.HumanCommand()
-	//case "r": e.Radio()
+
+	case "r": // radio
+		e.InitAudio(*audio)
+		e.RadioCommand()
+
 	default:
 		panic(*cmd)
 	}

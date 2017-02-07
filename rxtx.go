@@ -22,8 +22,7 @@ const (
 
 const VERSION = 11411
 const SamplesPerSec = 8000
-const PacketsPerSec = 20
-const SamplesPerPacket = 400
+const SamplesPerPacket = 200
 
 var ENDIAN = binary.BigEndian
 
@@ -194,10 +193,6 @@ func (e *Engine) InitAudio(path string) {
 	e.Audio = audio
 }
 
-func (e *Engine) Transmit() {
-	log.Fatalf("obsolete")
-}
-
 func ShowBytes(bb []byte) string {
 	z := bytes.NewBufferString("[")
 	prev := -1
@@ -246,6 +241,44 @@ func (e *Engine) HumanCommand() {
 	e.RunSendAudio(ptt)
 }
 
+func (e *Engine) RadioCommand() {
+	go e.RunRadioReceiveAudio()
+	e.RunRadioSendAudio()
+}
+
+func (e *Engine) RunRadioReceiveAudio() {
+	dev, devErr := os.OpenFile("/dev/ttyUSB0", os.O_RDWR, 0666)
+	if devErr != nil {
+		panic(devErr)
+	}
+
+	segment := make([]byte, SamplesPerPacket)
+	for {
+		h := e.ReadPacket(segment)
+		if h.Length > 0 {
+			n, err := e.Audio.Write(segment)
+			if err != nil {
+				panic(err)
+			}
+			if n != SamplesPerPacket {
+				log.Panicf("e.Audio.Write wrote %d bytes, wanted %d", n, SamplesPerPacket)
+				os.Exit(13)
+			}
+
+			// Send junk on Serial Cable to cause PTT on Radio.
+			junk := "abc"
+			n, err = dev.Write([]byte(junk))
+			if err != nil {
+				panic(err)
+			}
+			if n != len(junk) {
+				log.Panicf("dev.Write wrote %d bytes, wanted %d", n, len(junk))
+				os.Exit(13)
+			}
+		}
+	}
+}
+
 func (e *Engine) RunReceiveAudio() {
 	segment := make([]byte, SamplesPerPacket)
 	for {
@@ -285,6 +318,21 @@ func (e *Engine) RunSendAudio(ptt *PushToTalk) {
 		} else {
 			print(".")
 		}
+	}
+}
+
+func (e *Engine) RunRadioSendAudio() {
+	segment := make([]byte, SamplesPerPacket)
+	for {
+		n, err := e.Audio.Read(segment)
+		if err != nil {
+			panic(err)
+		}
+		if n != SamplesPerPacket {
+			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, SamplesPerPacket)
+			os.Exit(13)
+		}
+		e.SendToProxy(segment)
 	}
 }
 
