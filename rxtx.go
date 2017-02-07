@@ -26,6 +26,13 @@ const SamplesPerSec = 8000
 const SamplesPerPacket = 200
 
 var ENDIAN = binary.BigEndian
+var HSIZE = binary.Size(new(Header))
+
+func init() {
+	if HSIZE < 0 {
+		panic("HSIZE")
+	}
+}
 
 type Header struct {
 	Version int16
@@ -145,44 +152,30 @@ func (e *Engine) ReadPacket(segment []byte) *Header {
 	if err != nil {
 		panic(err)
 	}
-	//println("size", size)
 
-	h := new(Header)
-	hSize := binary.Size(h)
-	//println("hSize", hSize)
-	if hSize < 0 {
-		panic("hSize")
-	}
-
-	if size < hSize {
+	if size < HSIZE {
 		panic(size)
 	}
 
 	r := bytes.NewReader(packet)
+	h := new(Header)
 	err = binary.Read(r, binary.BigEndian, h)
 	if err != nil {
 		panic(err)
 	}
-	// e.MarkStation(h, addr)
 
-	// TODO: Authenticate.
-	// actualPayload := int(size) - hSize
-	//println("actualPayload", actualPayload)
-	// fmt.Printf("%#v\n", *h)
-	/*
-		if actualPayload != int(h.Length) {
-			Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
+	actualPayload := int(size) - HSIZE
+
+	if actualPayload != int(h.Length) {
+		Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
+	}
+
+	if h.Length > 0 {
+		if h.Length != SamplesPerPacket {
+			Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
 		}
-
-		if h.Length > 0 {
-			if h.Length != SamplesPerPacket {
-				Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
-			}
-		}
-	*/
-
-	copy(segment, packet[hSize:])
-
+		copy(segment, packet[HSIZE:])
+	}
 	return h
 }
 
