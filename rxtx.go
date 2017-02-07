@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -144,11 +145,11 @@ func (e *Engine) ReadPacket(segment []byte) *Header {
 	if err != nil {
 		panic(err)
 	}
-	println("size", size)
+	//println("size", size)
 
 	h := new(Header)
 	hSize := binary.Size(h)
-	println("hSize", hSize)
+	//println("hSize", hSize)
 	if hSize < 0 {
 		panic("hSize")
 	}
@@ -165,9 +166,9 @@ func (e *Engine) ReadPacket(segment []byte) *Header {
 	// e.MarkStation(h, addr)
 
 	// TODO: Authenticate.
-	actualPayload := int(size) - hSize
-	println("actualPayload", actualPayload)
-	fmt.Printf("%#v\n", *h)
+	// actualPayload := int(size) - hSize
+	//println("actualPayload", actualPayload)
+	// fmt.Printf("%#v\n", *h)
 	/*
 		if actualPayload != int(h.Length) {
 			Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
@@ -222,7 +223,7 @@ func (e *Engine) ProxyCommand() {
 		pals[whom] = addr
 
 		for w, a := range pals {
-			if w != whom || w == whom {
+			if w != whom {
 				out := packet[:size]
 				_, err := e.Sock.Conn.WriteToUDP(out, a)
 				// println("PROXY WROTE", n, a, ShowBytes(out))
@@ -241,12 +242,12 @@ func (e *Engine) HumanCommand() {
 	e.RunSendAudio(ptt)
 }
 
-func (e *Engine) RadioCommand() {
-	go e.RunRadioReceiveAudio()
+func (e *Engine) RadioCommand(usb string) {
+	go e.RunRadioReceiveAudio(usb)
 	e.RunRadioSendAudio()
 }
 
-func (e *Engine) RunRadioReceiveAudio() {
+func (e *Engine) RunRadioReceiveAudio(usb string) {
 	dev, devErr := os.OpenFile("/dev/ttyUSB0", os.O_RDWR, 0666)
 	if devErr != nil {
 		panic(devErr)
@@ -266,13 +267,12 @@ func (e *Engine) RunRadioReceiveAudio() {
 			}
 
 			// Send junk on Serial Cable to cause PTT on Radio.
-			junk := "abc"
-			n, err = dev.Write([]byte(junk))
+			n, err = dev.Write([]byte(usb))
 			if err != nil {
 				panic(err)
 			}
-			if n != len(junk) {
-				log.Panicf("dev.Write wrote %d bytes, wanted %d", n, len(junk))
+			if n != len(usb) {
+				log.Panicf("dev.Write wrote %d bytes, wanted %d", n, len(usb))
 				os.Exit(13)
 			}
 		}
@@ -314,11 +314,30 @@ func (e *Engine) RunSendAudio(ptt *PushToTalk) {
 		}
 		if ptt.Active() {
 			e.SendToProxy(segment)
-			print(":")
+			SayPower(segment)
 		} else {
 			print(".")
 		}
 	}
+}
+
+func SayPower(segment []byte) {
+	var sumsq int64
+	for _, e := range segment {
+		a := int64(e)
+		if (a & 0x80) != 0 {
+			a = 255 - a
+		}
+		a = 128 - a
+		sumsq += a * a
+	}
+	x := math.Sqrt(float64(sumsq) / float64(len(segment)))
+	fmt.Fprintf(os.Stderr, "(%d)", int64(x))
+
+	for i := 0; i < 30; i++ {
+		fmt.Fprintf(os.Stderr, " %3d", int64(segment[i]))
+	}
+	fmt.Fprintf(os.Stderr, "\n")
 }
 
 func (e *Engine) RunRadioSendAudio() {
@@ -333,6 +352,7 @@ func (e *Engine) RunRadioSendAudio() {
 			os.Exit(13)
 		}
 		e.SendToProxy(segment)
+		SayPower(segment)
 	}
 }
 
@@ -349,11 +369,11 @@ func (o *PushToTalk) Run() {
 	for {
 		n, err := os.Stdin.Read(enterToTalkBuf)
 		if n < 1 {
-			println("os.Stdin.Read < 1")
+			log.Fatalf("os.Stdin.Read < 1")
 			os.Exit(0)
 		}
 		if err != nil {
-			println("os.Stdin.Read --> err")
+			log.Fatalf("os.Stdin.Read --> err")
 			os.Exit(2)
 		}
 		o.LastEnter = time.Now()

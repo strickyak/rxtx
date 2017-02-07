@@ -19,6 +19,7 @@ var proxy = flag.String("proxy", "forth.yak.net:1500", "proxy to use")
 var me = flag.Int("me", 1, "my ID")
 var cmd = flag.String("cmd", "h", "what to do")
 var audio = flag.String("audio", "/dev/audio", "muLaw audio device")
+var junk = flag.String("junk", "abcdefgh", "junk to write on usb")
 
 func main() {
 	flag.Parse()
@@ -35,7 +36,7 @@ func main() {
 
 	case "r": // radio
 		e.InitAudio(*audio)
-		e.RadioCommand()
+		e.RadioCommand(*junk)
 
 	default:
 		panic(*cmd)
