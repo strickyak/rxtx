@@ -24,6 +24,7 @@ const (
 const VERSION = 11411
 const SamplesPerSec = 8000
 const SamplesPerPacket = 200
+const PacketsPerSecond = SamplesPerSec / SamplesPerPacket
 
 var ENDIAN = binary.BigEndian
 var HSIZE = binary.Size(new(Header))
@@ -31,6 +32,44 @@ var HSIZE = binary.Size(new(Header))
 func init() {
 	if HSIZE < 0 {
 		panic("HSIZE")
+	}
+}
+
+// Fixed size SegmentQueue.  If you add too many,
+// it drops the oldest ones.
+const QLEN = PacketsPerSecond
+type SegmentQueue struct {
+	Vec [][]byte
+	Begin	int
+	End	int
+	Size	int
+}
+
+func NewSegmentQueue() *SegmentQueue {
+	return &SegmentQueue{Vec: make([][]byte, QLEN)}
+}
+
+func (q SegmentQueue) String() string {
+	return fmt.Sprintf("%#v", q)
+}
+func (q *SegmentQueue) Add(segment []byte) {
+	q.Begin = (q.Begin + 1) % QLEN
+	q.Vec[q.Begin] = segment
+	if q.Size == QLEN {
+		// Drops the segment at the End.
+		q.End = (q.End + 1) % QLEN
+	} else {
+		q.Size += 1
+	}
+}
+
+func (q *SegmentQueue) Take() []byte {
+	if q.Size == 0 {
+		panic(q.String())
+	} else {
+		q.Size--
+		q.End = (q.End + 1) % QLEN
+		return q.Vec[q.End]
 	}
 }
 
@@ -49,6 +88,7 @@ type Station struct {
 	Id     byte
 	Touch time.Time
 	Addr   *net.UDPAddr
+	Skew	time.Duration  // Station's time minus our time, maximized.
 }
 
 type Socket struct {
