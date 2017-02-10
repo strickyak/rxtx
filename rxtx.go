@@ -12,7 +12,7 @@ import (
 	"os"
 	"time"
 )
-import . "log"
+import "github.com/strickyak/rxtx/mulaw"
 
 const (
 	PowerFlag = 0x01
@@ -47,8 +47,7 @@ type Header struct {
 
 type Station struct {
 	Id     byte
-	Latest time.Time // Latest time from this station.
-	Seq    byte      // Latest sequence from this station.
+	Touch time.Time
 	Addr   *net.UDPAddr
 }
 
@@ -61,12 +60,13 @@ type Socket struct {
 type Engine struct {
 	Me       int
 	Other    int
-	Stations map[byte]*Station
-	// PrevSecs int
-	// PrevSeq  int
+	Stations map[string]*Station
 	Sock      *Socket
 	ProxyAddr *net.UDPAddr
 	Audio     *os.File
+	// Generating time & seq numbers.
+	PrevTime	int64
+	PrevSeq		int
 }
 
 func NewEngine(me int, proxyAddrString string) *Engine {
@@ -76,21 +76,33 @@ func NewEngine(me int, proxyAddrString string) *Engine {
 	}
 	return &Engine{
 		Me:        me,
-		Stations:  make(map[byte]*Station),
+		Stations:  make(map[string]*Station),
 		ProxyAddr: a,
+		PrevTime: time.Now().Unix(),
 	}
 }
 
-func (e *Engine) RegisterStation(id byte, addr string) *Station {
-	a, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		panic(err)
+func (e *Engine) GetTimeAndSeq() (int64, int) {
+	now := time.Now().Unix()
+	if now == e.PrevTime {
+		e.PrevSeq++
+	} else {
+		e.PrevSeq = 0
+		e.PrevTime = now
 	}
-	station := &Station{
-		Id:   id,
-		Addr: a,
+	return e.PrevTime, e.PrevSeq
+}
+
+func (e *Engine) FindStation(addr *net.UDPAddr) *Station {
+	whom := addr.String()
+	station, ok := e.Stations[whom]
+	if !ok {
+		station = &Station{
+			Addr: addr,
+		}
+		e.Stations[whom] = station
 	}
-	e.Stations[id] = station
+	station.Touch = time.Now()
 	return station
 }
 
@@ -111,16 +123,15 @@ func (e *Engine) InitSocket(localAddr string) {
 }
 
 func (e *Engine) ForgeHeader() *Header {
-	now := time.Now().Unix()
 	h := &Header{
 		Version: VERSION,
 		Length:  0,
-		Time:    int32(now),
-		Seq:     0, // TODO
 		Flags:   0, // TODO
-		Source:  byte(e.Me),
+		Source:  byte(254),
 		Dest:    byte(255),
 	}
+	t, s := e.GetTimeAndSeq()
+	h.Time, h.Seq = int32(t), byte(s)
 	return h
 }
 
@@ -135,6 +146,7 @@ func (e *Engine) WritePacket(h *Header, segment []byte, dest *net.UDPAddr) {
 	z := make([]byte, sz+len(segment))
 	copy(z[:sz], w.String())
 	copy(z[sz:], segment)
+	println(ShowBytes(z[:sz]))
 
 	n, err := e.Sock.Conn.WriteToUDP(z, dest)
 
@@ -167,12 +179,12 @@ func (e *Engine) ReadPacket(segment []byte) *Header {
 	actualPayload := int(size) - HSIZE
 
 	if actualPayload != int(h.Length) {
-		Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
+		log.Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
 	}
 
 	if h.Length > 0 {
 		if h.Length != SamplesPerPacket {
-			Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
+			log.Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
 		}
 		copy(segment, packet[HSIZE:])
 	}
@@ -204,21 +216,18 @@ func ShowBytes(bb []byte) string {
 
 func (e *Engine) ProxyCommand() {
 	packet := make([]byte, 512)
-	pals := make(map[string]*net.UDPAddr)
 	for {
 		size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
 		if err != nil {
 			panic(err)
 		}
 		// println("PROXY GOT", size, addr, ShowBytes(packet[:20]))
+		st0 := e.FindStation(addr)
 
-		whom := addr.String()
-		pals[whom] = addr
-
-		for w, a := range pals {
-			if w != whom {
+		for _, st := range e.Stations {
+			if st != st0 {
 				out := packet[:size]
-				_, err := e.Sock.Conn.WriteToUDP(out, a)
+				_, err := e.Sock.Conn.WriteToUDP(out, st.Addr)
 				// println("PROXY WROTE", n, a, ShowBytes(out))
 				if err != nil {
 					panic(err)
@@ -316,21 +325,15 @@ func (e *Engine) RunSendAudio(ptt *PushToTalk) {
 
 func SayPower(segment []byte) {
 	var sumsq int64
+	var prev int64
 	for _, e := range segment {
-		a := int64(e)
-		if (a & 0x80) != 0 {
-			a = 255 - a
-		}
-		a = 128 - a
-		sumsq += a * a
+		a := int64(mulaw.DecodeMulaw16(e))
+		diff := a - prev
+		sumsq += diff * diff
+		prev = a
 	}
 	x := math.Sqrt(float64(sumsq) / float64(len(segment)))
-	fmt.Fprintf(os.Stderr, "(%d)", int64(x))
-
-	for i := 0; i < 30; i++ {
-		fmt.Fprintf(os.Stderr, " %3d", int64(segment[i]))
-	}
-	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "(%d) ", int64(x))
 }
 
 func (e *Engine) RunRadioSendAudio() {
