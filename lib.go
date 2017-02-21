@@ -287,7 +287,7 @@ func (e *Engine) Sendem() {
 	for _, st := range e.Stations {
 		for packet := st.Queue.Take(); packet != nil; packet = st.Queue.Take() {
 			if packet.Header.Flags&AudioFlag == 0 {
-				log.Fatalln("non-audio packets should already be handled", packet.Header.String())
+				// log.Fatalln("non-audio packets should already be handled", packet.Header.String())
 				continue
 			}
 			packets[st.Id] = packet
