@@ -1,7 +1,7 @@
 /* PushToTalk app, server (proxy), & radio controller.
 
 Next to do:
-  Send 0000 packet to proxy occasionally to keep proxy alive.
+  Don't send radio audio back to radio.
 
 */
 package rxtx
@@ -9,90 +9,90 @@ package rxtx
 import (
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"time"
-)
-import "github.com/strickyak/rxtx/mulaw"
 
-const (
-	PowerFlag = 0x01
-	TxFlag    = 0x02
-	AudioFlag = 0x04
-	WhoFlag   = 0x08
+	"github.com/strickyak/rxtx/mulaw"
 )
+
+var ORIGIN = flag.Int("o", 1, "bitset")
+var CHANNEL = flag.Int("chan", 1, "bitset")
+var SUBSCRIBE = flag.Int("sub", 1, "bitset")
+var SQUELCH = flag.Int("squelch", 300, "mulaw mean-square")
+
+/*
+	Packets per second, for 8000B/sec:
+	  50x 160B = 20ms
+	  40x 200B = 25ms
+	  32x 250B = 31ms
+	  25x 320B = 40ms
+	  20x 400B = 50ms
+*/
 
 const VERSION = 11411
 const SamplesPerSecond = 8000
-const SamplesPerPacket = 200
-const PacketsPerSecond = SamplesPerSecond / SamplesPerPacket
+const N = 200 // N == Samples per Second
+const PacketsPerSecond = SamplesPerSecond / N
+const BytesPerSampleInPayload = 1
+const PayloadLen = N * BytesPerSampleInPayload
 
 var ENDIAN = binary.BigEndian
 var HSIZE = binary.Size(new(Header))
 
 func init() {
+	// Check that Header is compatable with binary encoding.
 	if HSIZE < 0 {
 		panic("HSIZE")
 	}
 }
 
-// Fixed size SegmentQueue.  If you add too many,
-// it drops the oldest ones.
-const QLEN = PacketsPerSecond
+type FlagBits byte
 
-type SegmentQueue struct {
-	Vec   [][]byte
-	Begin int
-	End   int
-	Size  int
+func (b FlagBits) Has(f FlagBits) bool {
+	return (b & f) == f
 }
 
-func NewSegmentQueue() *SegmentQueue {
-	return &SegmentQueue{Vec: make([][]byte, QLEN)}
-}
-
-func (q SegmentQueue) String() string {
-	return fmt.Sprintf("%#v", q)
-}
-func (q *SegmentQueue) Add(segment []byte) {
-	q.Begin = (q.Begin + 1) % QLEN
-	q.Vec[q.Begin] = segment
-	if q.Size == QLEN {
-		// Drops the segment at the End.
-		q.End = (q.End + 1) % QLEN
-	} else {
-		q.Size += 1
-	}
-}
-
-func (q *SegmentQueue) Take() []byte {
-	if q.Size == 0 {
-		panic(q.String())
-	} else {
-		q.Size--
-		q.End = (q.End + 1) % QLEN
-		return q.Vec[q.End]
-	}
-}
+const (
+	AudioFlag FlagBits = (1 << iota) // Contains Audio Payload.
+	KeepAliveFlag
+	RadioFlag
+	FullDuplexFlag
+)
 
 type Header struct {
-	Version   int16
-	Length    int16
-	UnixNanos int64 // Unix nanos.
-	Flags     byte
-	Source    byte
-	Dest      byte
-	// TODO -- authenticate after payload.
+	Version           int16
+	Flags             FlagBits
+	Origin            BitSet // User(s) who are speaking.
+	Channel           BitSet // Packet goes to these channels.
+	Subscribe         BitSet // User subscribes to these channels.
+	UnixNanoTimestamp int64
+}
+
+func (h Header) String() string {
+	return fmt.Sprintf("{V%d F%d O:%d C:%d S:%d TS:%d} ",
+		h.Version, h.Flags, h.Origin, h.Channel, h.Subscribe, h.UnixNanoTimestamp)
+}
+
+type Packet struct {
+	Header  *Header
+	Segment []byte
+	Ints    []int16
 }
 
 type Station struct {
-	Id    byte
+	Id    string
 	Touch time.Time
 	Addr  *net.UDPAddr
 	Skew  time.Duration // Station's time minus our time, maximized.
-	Queue *SegmentQueue // Received from the station.
+	Queue *PacketQueue  // Received from the station.
+
+	Subscribe BitSet // User subscribes to these channels.
+	Origin    BitSet // User(s) who are speaking.
+	Channel   BitSet // Packet goes to these channels.
 }
 
 type Socket struct {
@@ -102,38 +102,41 @@ type Socket struct {
 }
 
 type Engine struct {
-	Me        int
-	Other     int
-	Stations  map[string]*Station
-	Sock      *Socket
-	ProxyAddr *net.UDPAddr
-	Audio     *os.File
+	Stations map[string]*Station
+	Sock     *Socket
+	HubAddr  *net.UDPAddr
+	Audio    *os.File
 }
 
-func NewEngine(me int, proxyAddrString string) *Engine {
+func NewEngine(proxyAddrString string) *Engine {
 	a, err := net.ResolveUDPAddr("udp", proxyAddrString)
 	if err != nil {
 		panic(err)
 	}
 	return &Engine{
-		Me:        me,
-		Stations:  make(map[string]*Station),
-		ProxyAddr: a,
+		Stations: make(map[string]*Station),
+		HubAddr:  a,
 	}
 }
 
-func (e *Engine) FindStation(addr *net.UDPAddr) *Station {
+func (e *Engine) FindStation(addr *net.UDPAddr, h *Header) *Station {
 	whom := addr.String()
 	station, ok := e.Stations[whom]
 	if !ok {
 		station = &Station{
+			Id:    addr.String(),
 			Addr:  addr,
-			Queue: NewSegmentQueue(),
+			Queue: NewPacketQueue(),
 			Skew:  -356 * 86400 * time.Second,
 		}
 		e.Stations[whom] = station
 	}
 	station.Touch = time.Now()
+	if h != nil {
+		station.Origin = h.Origin
+		station.Subscribe = h.Subscribe
+		station.Channel = h.Channel
+	}
 	return station
 }
 
@@ -155,18 +158,17 @@ func (e *Engine) InitSocket(localAddr string) {
 
 func (e *Engine) ForgeHeader() *Header {
 	h := &Header{
-		Version: VERSION,
-		Length:  0,
-		Flags:   0, // TODO
-		Source:  byte(254),
-		Dest:    byte(255),
+		Version:   VERSION,
+		Flags:     AudioFlag,
+		Origin:    BitSet(*ORIGIN),
+		Channel:   BitSet(*CHANNEL),
+		Subscribe: BitSet(*SUBSCRIBE),
 	}
-	h.UnixNanos = time.Now().UnixNano()
+	h.UnixNanoTimestamp = time.Now().UnixNano()
 	return h
 }
 
 func (e *Engine) WritePacket(h *Header, segment []byte, dest *net.UDPAddr) {
-	h.Length = int16(len(segment))
 	sz := binary.Size(h)
 	w := bytes.NewBuffer(nil)
 	err := binary.Write(w, ENDIAN, h)
@@ -208,13 +210,9 @@ func (e *Engine) ReadPacket(segment []byte, conn *net.UDPConn) (*Header, *net.UD
 
 	actualPayload := int(size) - HSIZE
 
-	if actualPayload != int(h.Length) {
-		log.Panicf("Got %d payload bytes; expected %d", actualPayload, h.Length)
-	}
-
-	if h.Length > 0 {
-		if h.Length != SamplesPerPacket {
-			log.Panicf("Got payload length %d wanted %d", h.Length, SamplesPerPacket)
+	if (h.Flags & AudioFlag) == AudioFlag {
+		if actualPayload != N {
+			log.Printf("Got payload length %d wanted %d", PayloadLen, N)
 		}
 		copy(segment, packet[HSIZE:])
 	}
@@ -244,42 +242,94 @@ func ShowBytes(bb []byte) string {
 	return z.String()
 }
 
-func (e *Engine) SendToEach(segment []byte) {
-	println("PROXY SendToEach", ShowBytes(segment[:20]))
+func (e *Engine) SendToEach(p *Packet) {
+	println("PROXY SendToEach", ShowBytes(p.Segment[:20]))
 	for addr, st := range e.Stations {
 		println("Station:", addr, time.Since(st.Touch).String())
-		if time.Since(st.Touch) < 30*time.Second {
-			h := e.ForgeHeader()
-			println("WRITE TO Station:", addr)
-			e.WritePacket(h, segment, st.Addr)
+		if time.Since(st.Touch) > 30*time.Second {
+			println("BAD TIME", st.Touch.String())
+			continue
 		}
+
+		if st.Subscribe&p.Header.Channel == 0 {
+			continue
+		}
+
+		h := e.ForgeHeader()
+		h.Origin = p.Header.Origin
+		h.Channel = p.Header.Channel
+		h.Subscribe = p.Header.Subscribe
+		println("WRITE TO Station:", addr)
+		e.WritePacket(h, p.Segment, st.Addr)
 	}
 }
+
+func MulawDecode(a []byte) []int16 {
+	z := make([]int16, N)
+	for i := 0; i < N; i++ {
+		z[i] += mulaw.DecodeMulaw16(a[i])
+	}
+	return z
+}
+func MulawEncode(a []int16) []byte {
+	z := make([]byte, N)
+	for i := 0; i < N; i++ {
+		z[i] = mulaw.EncodeMulaw16(a[i])
+	}
+	return z
+}
+
 func (e *Engine) Sendem() {
-	sum := make([]int, SamplesPerPacket)
-	something := false
-	for addr, st := range e.Stations {
-		if st.Queue.Size > 0 {
-			segment := st.Queue.Take()
-			for i := 0; i < SamplesPerPacket; i++ {
-				sum[i] += int(mulaw.DecodeMulaw16(segment[i]))
+	var origins BitSet
+	packets := make(map[string]*Packet)
+
+	// Collect a segment from very station.
+	for _, st := range e.Stations {
+		for packet := st.Queue.Take(); packet != nil; packet = st.Queue.Take() {
+			if packet.Header.Flags&AudioFlag == 0 {
+				log.Fatalln("non-audio packets should already be handled", packet.Header.String())
+				continue
 			}
-			print("Received From ", addr)
-			SayPower(segment)
-			something = true
+			packets[st.Id] = packet
+			packet.Ints = MulawDecode(packet.Segment)
+			origins |= st.Origin
+			break // Only take 1 audio packet off the Queue at a time.
 		}
 	}
-	if something {
-		segment := make([]byte, SamplesPerPacket)
-		for i := 0; i < SamplesPerPacket; i++ {
-			segment[i] += mulaw.EncodeMulaw16(int16(sum[i]))
+
+	// Gather and send to every station.
+	for id, st := range e.Stations {
+		sum := make([]int16, N)
+		something := false
+
+		// Examine & include all packets going to the station.
+		for id, p := range packets {
+			if (id == st.Id) && !(p.Header.Flags.Has(FullDuplexFlag)) {
+				continue
+			}
+
+			// Adds the segment to the sum, setting something.
+			for i := 0; i < N; i++ {
+				x := p.Ints[i]
+				sum[i] += x
+				if x != 0 {
+					something = true
+				}
+			}
 		}
-		print("SUM: ")
-		_ = SayPower(segment)
-		e.SendToEach(segment)
+
+		if something {
+			h := e.ForgeHeader()
+			h.Origin = origins
+			h.Channel = BitSet(0xFF)
+			h.Subscribe = BitSet(0xFF)
+			println("WRITE TO Station:", id)
+			e.WritePacket(h, MulawEncode(sum), st.Addr)
+		}
 	}
 }
-func (e *Engine) ProxySendLoop() {
+
+func (e *Engine) HubSendLoop() {
 	t0 := time.Now()
 	delta := time.Second / PacketsPerSecond
 	i := 0
@@ -294,13 +344,14 @@ func (e *Engine) ProxySendLoop() {
 	}
 }
 
-func (e *Engine) ProxyRecvLoop() {
-	segment := make([]byte, SamplesPerPacket)
+func (e *Engine) HubRecvLoop() {
 	for {
+		segment := make([]byte, N)
 		h, addr := e.ReadPacket(segment, e.Sock.Conn)
-		st := e.FindStation(addr)
+		st := e.FindStation(addr, h)
 
-		skew := time.Unix(0, h.UnixNanos).Sub(time.Now())
+		packetTime := time.Unix(0, h.UnixNanoTimestamp)
+		skew := packetTime.Sub(time.Now())
 		if skew < -5*time.Second {
 			continue // Don't tolerate much skew.
 		}
@@ -309,118 +360,121 @@ func (e *Engine) ProxyRecvLoop() {
 			st.Skew = skew
 		}
 
-		st.Queue.Add(segment)
+		if h.Flags == KeepAliveFlag {
+			fmt.Fprintf(os.Stderr, " <KEEPALIVE:%d:%v> ", h.Flags, addr)
+		}
+
+		st.Queue.Add(&Packet{h, segment, nil})
 	}
 }
 
-func (e *Engine) ProxyCommand() {
-	go e.ProxyRecvLoop()
-	e.ProxySendLoop()
-}
-
-func (e *Engine) OldProxyCommand() {
-	packet := make([]byte, 512)
-	for {
-		size, addr, err := e.Sock.Conn.ReadFromUDP(packet)
-		if err != nil {
-			panic(err)
-		}
-		// println("PROXY GOT", size, addr, ShowBytes(packet[:20]))
-		st0 := e.FindStation(addr)
-
-		for _, st := range e.Stations {
-			if st != st0 {
-				out := packet[:size]
-				_, err := e.Sock.Conn.WriteToUDP(out, st.Addr)
-				// println("PROXY WROTE", n, a, ShowBytes(out))
-				if err != nil {
-					panic(err)
-				}
-			}
-		}
-	}
+func (e *Engine) HubCommand() {
+	go e.HubRecvLoop()
+	e.HubSendLoop()
 }
 
 func (e *Engine) HumanCommand() {
 	ptt := new(PushToTalk)
 	go ptt.Run()
-	go e.RunReceiveAudio(ptt)
-	e.RunSendAudio(ptt)
+	go e.KeepAliveLoop(KeepAliveFlag)
+	go e.HumanReceiveNetworkLoop(ptt)
+	e.HumanSendNetworkLoop(ptt)
 }
 
 func (e *Engine) RadioCommand(usb string) {
-	go e.RunRadioReceiveAudio(usb)
-	e.RunRadioSendAudio()
+	go e.KeepAliveLoop(RadioFlag | KeepAliveFlag)
+	go e.RadioReceiveNetworkLoop(usb)
+	e.RadioSendNetworkLoop()
 }
 
-func (e *Engine) RunRadioReceiveAudio(usb string) {
-	dev, devErr := os.OpenFile("/dev/ttyUSB0", os.O_RDWR, 0666)
-	if devErr != nil {
-		panic(devErr)
+func (e *Engine) RadioSendNetworkLoop() {
+	segment := make([]byte, N)
+	for {
+		n, err := e.Audio.Read(segment)
+		Check(err)
+		if n != N {
+			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, N)
+			os.Exit(13)
+		}
+		x := SayPower(segment)
+		if x > float64(*SQUELCH) {
+			e.SendToHub(segment, RadioFlag)
+		}
 	}
+}
 
-	segment := make([]byte, SamplesPerPacket)
+func (e *Engine) RadioReceiveNetworkLoop(usb string) {
+	var lastTimestamp int64
+
+	dev, devErr := os.OpenFile("/dev/ttyUSB0", os.O_RDWR, 0666)
+	Check(devErr)
+
+	segment := make([]byte, N)
 	for {
 		h, _ := e.ReadPacket(segment, e.Sock.Conn)
-		if h.Length > 0 {
+		_ = h
+		if PayloadLen > 0 && h.UnixNanoTimestamp > lastTimestamp {
+			lastTimestamp = h.UnixNanoTimestamp
+
 			n, err := e.Audio.Write(segment)
-			if err != nil {
-				panic(err)
-			}
-			if n != SamplesPerPacket {
-				log.Panicf("e.Audio.Write wrote %d bytes, wanted %d", n, SamplesPerPacket)
-				os.Exit(13)
-			}
+			Check(err)
+			Assert(n == N)
 
 			// Send junk on Serial Cable to cause PTT on Radio.
 			n, err = dev.Write([]byte(usb))
-			if err != nil {
-				panic(err)
-			}
-			if n != len(usb) {
-				log.Panicf("dev.Write wrote %d bytes, wanted %d", n, len(usb))
-				os.Exit(13)
-			}
+			Check(err)
+			Assert(n == len(usb))
 		}
 	}
 }
 
-func (e *Engine) RunReceiveAudio(ptt *PushToTalk) {
-	segment := make([]byte, SamplesPerPacket)
+func (e *Engine) HumanReceiveNetworkLoop(ptt *PushToTalk) {
+	segment := make([]byte, N)
 	for {
 		h, _ := e.ReadPacket(segment, e.Sock.Conn)
-		if h.Length > 0 && !ptt.Active() {
+		_ = h
+		if PayloadLen > 0 && !ptt.Active() {
 			n, err := e.Audio.Write(segment)
 			if err != nil {
 				panic(err)
 			}
-			if n != SamplesPerPacket {
-				log.Panicf("e.Audio.Write wrote %d bytes, wanted %d", n, SamplesPerPacket)
+			if n != N {
+				log.Panicf("e.Audio.Write wrote %d bytes, wanted %d", n, N)
 				os.Exit(13)
 			}
 		}
 	}
 }
 
-func (e *Engine) SendToProxy(segment []byte) {
+func (e *Engine) SendToHub(segment []byte, extraFlags FlagBits) {
 	h := e.ForgeHeader()
-	e.WritePacket(h, segment, e.ProxyAddr)
+	h.Flags |= extraFlags
+	e.WritePacket(h, segment, e.HubAddr)
 }
 
-func (e *Engine) RunSendAudio(ptt *PushToTalk) {
-	segment := make([]byte, SamplesPerPacket)
+func (e *Engine) KeepAliveLoop(flags FlagBits) {
+	for {
+		h := e.ForgeHeader()
+		h.Flags = flags
+		e.WritePacket(h, nil, e.HubAddr)
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func (e *Engine) HumanSendNetworkLoop(ptt *PushToTalk) {
+	segment := make([]byte, N)
 	for {
 		n, err := e.Audio.Read(segment)
 		if err != nil {
 			panic(err)
 		}
-		if n != SamplesPerPacket {
-			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, SamplesPerPacket)
+		if n != N {
+			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, N)
 			os.Exit(13)
 		}
 		if ptt.Active() {
 			_ = SayPower(segment)
-			e.SendToProxy(segment)
+			e.SendToHub(segment, 0)
 		} else {
 			print(".")
 		}
@@ -442,24 +496,6 @@ func SayPower(segment []byte) float64 {
 	return x
 }
 
-func (e *Engine) RunRadioSendAudio() {
-	segment := make([]byte, SamplesPerPacket)
-	for {
-		n, err := e.Audio.Read(segment)
-		if err != nil {
-			panic(err)
-		}
-		if n != SamplesPerPacket {
-			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, SamplesPerPacket)
-			os.Exit(13)
-		}
-		x := SayPower(segment)
-		if x > 400 {
-			e.SendToProxy(segment)
-		}
-	}
-}
-
 type PushToTalk struct {
 	LastEnter time.Time
 }
@@ -472,13 +508,10 @@ func (o *PushToTalk) Active() bool {
 func (o *PushToTalk) Run() {
 	for {
 		n, err := os.Stdin.Read(enterToTalkBuf)
+		Check(err)
 		if n < 1 {
 			log.Fatalf("os.Stdin.Read < 1")
 			os.Exit(0)
-		}
-		if err != nil {
-			log.Fatalf("os.Stdin.Read --> err")
-			os.Exit(2)
 		}
 		o.LastEnter = time.Now()
 	}

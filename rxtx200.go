@@ -2,7 +2,7 @@
 
 // sudo ufw allow 44144/udp
 // ./rxtx-200 --bind=:44144 --cmd=p
-// go run main.go --proxy=xxxxx.yyy.zed:44144
+// go run main.go --hub=xxxxx.yyy.zed:44144
 
 package main
 
@@ -15,20 +15,19 @@ import (
 )
 
 var bind = flag.String("bind", ":44144", "port to bind to")
-var proxy = flag.String("proxy", "forth.yak.net:1500", "proxy to use")
-var me = flag.Int("me", 1, "my ID")
+var hub = flag.String("hub", "localhost:44144", "hub to use")
 var cmd = flag.String("cmd", "h", "what to do")
 var audio = flag.String("audio", "/dev/audio", "muLaw audio device")
-var junk = flag.String("junk", "abcdefgh", "junk to write on usb")
+var junk = flag.String("junk", "UUU", "junk to write on usb")
 
 func main() {
 	flag.Parse()
-	e := NewEngine(*me, *proxy)
+	e := NewEngine(*hub)
 	e.InitSocket(*bind)
 	switch *cmd {
 
-	case "p": // proxy
-		e.ProxyCommand()
+	case "x": // hub
+		e.HubCommand()
 
 	case "h": // human
 		e.InitAudio(*audio)
