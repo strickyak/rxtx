@@ -1,7 +1,9 @@
 /* PushToTalk app, server (proxy), & radio controller.
 
 Next to do:
-  Don't send radio audio back to radio.
+  Radio Off is noisier than Radio On, so Inhibit radio-off noise somehow.
+  Probably hub tells radio there are no humans, so don't send packets from radio.
+
 
 */
 package rxtx
@@ -40,6 +42,10 @@ const PacketsPerSecond = SamplesPerSecond / N
 const BytesPerSampleInPayload = 1
 const PayloadLen = N * BytesPerSampleInPayload
 
+const AliveDuration = 60 * time.Second
+const MaxSkewDuration = 5 * time.Second
+const KeepAliveDuration = 15 * time.Second
+
 var ENDIAN = binary.BigEndian
 var HSIZE = binary.Size(new(Header))
 
@@ -61,6 +67,7 @@ const (
 	KeepAliveFlag
 	RadioFlag
 	FullDuplexFlag
+	HumanListeningFlag // Hub to stations.
 )
 
 type Header struct {
@@ -87,12 +94,16 @@ type Station struct {
 	Id    string
 	Touch time.Time
 	Addr  *net.UDPAddr
-	Skew  time.Duration // Station's time minus our time, maximized.
-	Queue *PacketQueue  // Received from the station.
+	Queue *PacketQueue // Received from the station.
 
-	Subscribe BitSet // User subscribes to these channels.
-	Origin    BitSet // User(s) who are speaking.
-	Channel   BitSet // Packet goes to these channels.
+	Subscribe BitSet   // User subscribes to these channels.
+	Origin    BitSet   // User(s) who are speaking.
+	Channel   BitSet   // Packet goes to these channels.
+	Flags     FlagBits // Recent flag bits from station.
+}
+
+func (st *Station) Alive() bool {
+	return time.Since(st.Touch) < AliveDuration
 }
 
 type Socket struct {
@@ -127,7 +138,6 @@ func (e *Engine) FindStation(addr *net.UDPAddr, h *Header) *Station {
 			Id:    addr.String(),
 			Addr:  addr,
 			Queue: NewPacketQueue(),
-			Skew:  -356 * 86400 * time.Second,
 		}
 		e.Stations[whom] = station
 	}
@@ -279,7 +289,16 @@ func MulawEncode(a []int16) []byte {
 	return z
 }
 
-func (e *Engine) Sendem() {
+func (e *Engine) HumansAreActive() bool {
+	for _, st := range e.Stations {
+		if !st.Flags.Has(RadioFlag) && st.Alive() {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) HubSendem() {
 	var origins BitSet
 	packets := make(map[string]*Packet)
 
@@ -287,7 +306,7 @@ func (e *Engine) Sendem() {
 	for _, st := range e.Stations {
 		for packet := st.Queue.Take(); packet != nil; packet = st.Queue.Take() {
 			if packet.Header.Flags&AudioFlag == 0 {
-				// log.Fatalln("non-audio packets should already be handled", packet.Header.String())
+				log.Fatalln("non-audio packets should already be handled", packet.Header.String())
 				continue
 			}
 			packets[st.Id] = packet
@@ -299,6 +318,9 @@ func (e *Engine) Sendem() {
 
 	// Gather and send to every station.
 	for id, st := range e.Stations {
+		if !st.Alive() {
+			continue
+		}
 		sum := make([]int16, N)
 		something := false
 
@@ -340,7 +362,7 @@ func (e *Engine) HubSendLoop() {
 		if now.Before(target) {
 			continue
 		}
-		e.Sendem()
+		e.HubSendem()
 	}
 }
 
@@ -350,21 +372,23 @@ func (e *Engine) HubRecvLoop() {
 		h, addr := e.ReadPacket(segment, e.Sock.Conn)
 		st := e.FindStation(addr, h)
 
-		packetTime := time.Unix(0, h.UnixNanoTimestamp)
-		skew := packetTime.Sub(time.Now())
-		if skew < -5*time.Second {
-			continue // Don't tolerate much skew.
+		packetTimeStamp := time.Unix(0, h.UnixNanoTimestamp)
+		age := time.Since(packetTimeStamp)
+		if age > MaxSkewDuration || age < -MaxSkewDuration {
+			continue // Don't tolerate clocks out of sync, or replay attacks.
 		}
 
-		if st.Skew < skew {
-			st.Skew = skew
+		if packetTimeStamp.Sub(st.Touch) <= 0 {
+			continue // Don't accept aything older than we alreay heard.
 		}
 
+		st.Flags = h.Flags
+		st.Touch = time.Now()
 		if h.Flags == KeepAliveFlag {
 			fmt.Fprintf(os.Stderr, " <KEEPALIVE:%d:%v> ", h.Flags, addr)
+		} else {
+			st.Queue.Add(&Packet{h, segment, nil})
 		}
-
-		st.Queue.Add(&Packet{h, segment, nil})
 	}
 }
 
@@ -457,7 +481,7 @@ func (e *Engine) KeepAliveLoop(flags FlagBits) {
 		h := e.ForgeHeader()
 		h.Flags = flags
 		e.WritePacket(h, nil, e.HubAddr)
-		time.Sleep(10 * time.Second)
+		time.Sleep(KeepAliveDuration)
 	}
 }
 
@@ -503,7 +527,7 @@ type PushToTalk struct {
 var enterToTalkBuf = make([]byte, 2)
 
 func (o *PushToTalk) Active() bool {
-	return o.LastEnter.Add(time.Second).After(time.Now())
+	return o.LastEnter.Add(600 * time.Millisecond).After(time.Now())
 }
 func (o *PushToTalk) Run() {
 	for {
