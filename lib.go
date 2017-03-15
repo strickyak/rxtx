@@ -289,7 +289,7 @@ func MulawEncode(a []int16) []byte {
 	return z
 }
 
-func (e *Engine) HumansAreActive() bool {
+func (e *Engine) HumansAreAlive() bool {
 	for _, st := range e.Stations {
 		if !st.Flags.Has(RadioFlag) && st.Alive() {
 			return true
@@ -411,6 +411,7 @@ func (e *Engine) RadioCommand(usb string) {
 	e.RadioSendNetworkLoop()
 }
 
+// Send to network (not send on air)
 func (e *Engine) RadioSendNetworkLoop() {
 	segment := make([]byte, N)
 	for {
@@ -420,13 +421,16 @@ func (e *Engine) RadioSendNetworkLoop() {
 			log.Panicf("e.Audio.Read got %d bytes, wanted %d", n, N)
 			os.Exit(13)
 		}
-		x := SayPower(segment)
-		if x > float64(*SQUELCH) {
-			e.SendToHub(segment, RadioFlag)
+		if e.HumansAreAlive() {
+			x := SayPower(segment)
+			if x > float64(*SQUELCH) {
+				e.SendToHub(segment, RadioFlag)
+			}
 		}
 	}
 }
 
+// Receive from network (not receiver from air)
 func (e *Engine) RadioReceiveNetworkLoop(usb string) {
 	var lastTimestamp int64
 
