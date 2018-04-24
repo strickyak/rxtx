@@ -13,6 +13,8 @@ import (
 	"strconv"
 )
 
+const TONE_LENGTH = 0.15
+
 const RATE = 8000
 const GAIN = 1000
 
@@ -58,7 +60,7 @@ func main() {
 	buf := make([]byte, 1)
 
 	for _, digit := range digits {
-		for t := 0; t < int(0.5*RATE); t++ {
+		for t := 0; t < int(TONE_LENGTH*RATE); t++ {
 			f1, f2 := dtmf(digit)
 			x1 := toneSample(f1, GAIN, t)
 			x2 := toneSample(f2, GAIN, t)
@@ -68,7 +70,7 @@ func main() {
 			if err != nil { panic(err) }
 			if n != 1 { panic(n) }
 		}
-		for t := 0; t < int(0.5*RATE); t++ {
+		for t := 0; t < int(TONE_LENGTH*RATE); t++ {
 			buf[0] = 0
 			n, err := os.Stdout.Write(buf)
 			if err != nil { panic(err) }
