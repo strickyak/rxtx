@@ -5,7 +5,11 @@
 
    Uses 500, 600, 700, 800, and 900 Hz tones for five columns.
 
-   Usage:    a.out 'de W6REK' >/dev/audio
+   Usage:    a.out 'Test DE W6REK' >/dev/audio
+
+   go run glyphfall.go -p 3000 "Test DE W6REK" | pacat --format=mulaw --rate=8000 --channels=1 -d DEVICE
+
+   (Use "pacmd list" to discover DEVICE names.)
 */
 package main
 
