@@ -5,17 +5,31 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 )
-import "github.com/strickyak/rxtx/qrss"
+import . "github.com/strickyak/rxtx/qrss"
+
+var RATE = flag.Float64("rate", 44100, "Audio Sample Rate")
+var SECS = flag.Float64("secs", 6, "Tone length in secs")
+var RAMP = flag.Float64("ramp", 1.0, "Tone length in secs")
+var GAIN = flag.Float64("gain", 0.86, "Modulation")
 
 func main() {
-	fmt.Fprintf(os.Stderr, "%v\n", qrss.ExpandNested(qrss.W6REK))
-	fmt.Fprintf(os.Stderr, "%v\n", qrss.ExpandWord(qrss.W6REK))
+	tg := ToneGen{
+		SampleRate: *RATE,
+		ToneLen:    *SECS,
+		RampLen:    *RAMP,
+	}
 
-	bb := qrss.Play(qrss.ExpandNested(qrss.W6REK))
+	fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(W6REK))
+	fmt.Fprintf(os.Stderr, "%v\n", ExpandWord(W6REK))
+	fmt.Fprintf(os.Stderr, "%v\n", len(ExpandNested(W6REK)))
+	fmt.Fprintf(os.Stderr, "%v\n", len(ExpandWord(W6REK)))
+
+	volts := tg.Play(ExpandNested(W6REK))
 	w := bufio.NewWriter(os.Stdout)
-	w.Write(bb)
+	w.Write(VoltsToS16be(volts, *GAIN))
 	w.Flush()
 }

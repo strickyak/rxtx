@@ -7,46 +7,51 @@ import (
 const BaseHz = 500 // 500
 const StepHz = 5   // 100 // 5
 
-const SampleHz = 44100              // 8000  // samples per second
-const GradualSamples = SampleHz / 5 // A fifth of a second
+type Volt float64
 
-const WholeNote = 6 * SampleHz // seconds
-const HalfNote = 3 * SampleHz  // seconds
+type ToneGen struct {
+	SampleRate float64 // Samples per second (Hz)
+	ToneLen    float64 // Length in seconds
+	RampLen    float64 // ramp-up, ramp-down in seconds
+}
 
-func Play(levels []byte) []byte {
-	var z []byte
-	var prev byte = 255
-	for _, b := range levels {
-		if b == prev {
-			prev = 255
-			continue
-		}
-		if b == 0 {
-			z = append(z, Gap()...)
-			prev = 255
-		} else {
-			z = append(z, Boop(b)...)
-			prev = b
-		}
+func (tg ToneGen) WholeTicks() float64 {
+	return tg.SampleRate * tg.ToneLen
+}
+
+func (tg ToneGen) RampTicks() float64 {
+	return tg.SampleRate * tg.RampLen
+}
+
+func (tg ToneGen) Play(tones []Tone) []Volt {
+	var z []Volt
+	for _, b := range tones {
+		z = append(z, tg.Boop(b)...)
 	}
 	return z
 }
 
-func Boop(level byte) []byte {
-	var z []byte
-	hz := BaseHz + float64(level)*StepHz
-	for t := 0; t < WholeNote; t++ {
+// Notice Boop(0) produces silence.
+func (tg ToneGen) Boop(tone Tone) []Volt {
+	var z []Volt
+	hz := BaseHz + float64(tone)*StepHz
+	for t := 0; t < int(tg.WholeTicks()); t++ {
+		if tone == 0 {
+			z = append(z, Volt(0.0))
+			continue
+		}
+
 		var gain float64
 		switch {
-		case t < GradualSamples:
+		case t < int(tg.RampTicks()):
 			{
-				x := (float64(t) / float64(GradualSamples)) * math.Pi
+				x := (float64(t) / tg.RampTicks()) * math.Pi
 				y := math.Cos(x)
 				gain = 0.5 - y/2.0
 			}
-		case WholeNote-t < GradualSamples:
+		case int(tg.WholeTicks())-t < int(tg.RampTicks()):
 			{
-				x := (float64(WholeNote-t) / float64(GradualSamples)) * math.Pi
+				x := ((tg.WholeTicks() - float64(t)) / tg.RampTicks()) * math.Pi
 				y := math.Cos(x)
 				gain = 0.5 - y/2.0
 			}
@@ -56,18 +61,30 @@ func Boop(level byte) []byte {
 			}
 		}
 
-		theta := float64(t) * hz * (2.0 * math.Pi) / SampleHz
-		volts := gain * math.Sin(theta)
-		short := int16(10000 * volts)
-		z = append(z, byte(short>>8), byte(short))
+		theta := float64(t) * hz * (2.0 * math.Pi) / tg.SampleRate
+		v := gain * math.Sin(theta)
+		z = append(z, Volt(v))
 	}
 	return z
 }
 
-func Gap() []byte {
+const MaxShort = 0x7FFF
+
+func VoltsToS16be(vv []Volt, gain float64) []byte {
 	var z []byte
-	for t := 0; t < HalfNote; t++ {
-		z = append(z, 0, 0)
+	for i := 0; i < len(vv); i++ {
+		v := gain * float64(vv[i])
+		// Clip at +/- 1 unit.
+		if v > 1.0 {
+			v = 1.0
+		}
+		if v < -1.0 {
+			v = -1.0
+		}
+		short := int(MaxShort * v)
+
+		z = append(z, byte(255&(short>>8)), byte(255&short))
+
 	}
 	return z
 }

@@ -1,10 +1,10 @@
 package qrss
 
-/* My personal plan for Dual Tone Continuous Wave:
-Dit and Dah are both 2 time units.
-One unit gap between repeated dits or dahs.
-Three unit gap between letters.
-*/
+import (
+	"log"
+)
+
+type Tone byte
 
 var W = ".--"
 var SIX = "-...."
@@ -14,37 +14,32 @@ var K = "-.-"
 
 var W6REK = []string{W, SIX, R, E, K}
 
-func ExpandLetter(s string) []byte {
-	var z []byte
-	prev := 'x'
+func ExpandLetter(s string) []Tone {
+	var z []Tone
 	for _, c := range s {
-		if c == prev {
-			z = append(z, 0)
-		}
 		switch c {
 		case '.':
-			z = append(z, 1, 1)
+			z = append(z, 1)
 		case '-':
-			z = append(z, 2, 2)
+			z = append(z, 2)
 		default:
-			panic(s)
+			log.Fatalf("Should just be dots and dashes: %q", s)
 		}
-		prev = c
 	}
-	z = append(z, 0, 0, 0)
+	z = append(z, 0)
 	return z
 }
 
-func ExpandWord(w []string) []byte {
-	var z []byte
+func ExpandWord(w []string) []Tone {
+	var z []Tone
 	for _, s := range w {
 		z = append(z, ExpandLetter(s)...)
 	}
 	return z
 }
 
-func ExpandNested(w []string) []byte {
-	var z []byte
+func ExpandNested(w []string) []Tone {
+	var z []Tone
 	vec := ExpandWord(w)
 	var skip bool
 	for _, a := range vec {
