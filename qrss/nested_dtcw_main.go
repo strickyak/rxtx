@@ -14,13 +14,17 @@ import . "github.com/strickyak/rxtx/qrss"
 var RATE = flag.Float64("rate", 44100, "Audio Sample Rate")
 var SECS = flag.Float64("secs", 6, "Tone length in secs")
 var RAMP = flag.Float64("ramp", 1.0, "Tone length in secs")
-var GAIN = flag.Float64("gain", 0.86, "Modulation")
+var GAIN = flag.Float64("gain", 0.86, "Modulation Gain")
+var BASE = flag.Float64("base", 500, "Base Hz")
+var STEP = flag.Float64("step", 4, "Tone Step Hz")
 
 func main() {
 	tg := ToneGen{
 		SampleRate: *RATE,
 		ToneLen:    *SECS,
 		RampLen:    *RAMP,
+		BaseHz:     *BASE,
+		StepHz:     *STEP,
 	}
 
 	fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(W6REK))

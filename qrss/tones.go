@@ -4,15 +4,14 @@ import (
 	"math"
 )
 
-const BaseHz = 500 // 500
-const StepHz = 5   // 100 // 5
-
 type Volt float64
 
 type ToneGen struct {
 	SampleRate float64 // Samples per second (Hz)
 	ToneLen    float64 // Length in seconds
 	RampLen    float64 // ramp-up, ramp-down in seconds
+	BaseHz     float64
+	StepHz     float64
 }
 
 func (tg ToneGen) WholeTicks() float64 {
@@ -34,7 +33,7 @@ func (tg ToneGen) Play(tones []Tone) []Volt {
 // Notice Boop(0) produces silence.
 func (tg ToneGen) Boop(tone Tone) []Volt {
 	var z []Volt
-	hz := BaseHz + float64(tone)*StepHz
+	hz := tg.BaseHz + float64(tone)*tg.StepHz
 	for t := 0; t < int(tg.WholeTicks()); t++ {
 		if tone == 0 {
 			z = append(z, Volt(0.0))
