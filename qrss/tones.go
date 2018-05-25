@@ -25,17 +25,23 @@ func (tg ToneGen) RampTicks() float64 {
 func (tg ToneGen) Play(tones []Tone) []Volt {
 	var z []Volt
 	for _, b := range tones {
-		z = append(z, tg.Boop(b)...)
+		z = append(z, tg.Boop(b, b)...)
 	}
 	return z
 }
 
 // Notice Boop(0) produces silence.
-func (tg ToneGen) Boop(tone Tone) []Volt {
+func (tg ToneGen) Boop(tone1, tone2 Tone) []Volt {
 	var z []Volt
-	hz := tg.BaseHz + float64(tone)*tg.StepHz
-	for t := 0; t < int(tg.WholeTicks()); t++ {
-		if tone == 0 {
+	hz1 := tg.BaseHz + float64(tone1)*tg.StepHz
+	hz2 := tg.BaseHz + float64(tone2)*tg.StepHz
+	wholeTicks := int(tg.WholeTicks())
+	for t := 0; t < wholeTicks; t++ {
+
+		portion := float64(t) / float64(wholeTicks)
+		hz := hz1 + float64(hz2-hz1)*portion
+
+		if tone1 == 0 && !*WITH_TAILS {
 			z = append(z, Volt(0.0))
 			continue
 		}
