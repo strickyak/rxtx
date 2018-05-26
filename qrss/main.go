@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
+	"math/rand"
 	"os"
 )
 import . "github.com/strickyak/rxtx/qrss"
@@ -16,18 +18,22 @@ var SECS = flag.Float64("secs", 6, "Tone length in secs")
 var RAMP = flag.Float64("ramp", 1.0, "Ramp up/down time in secs")
 var GAIN = flag.Float64("gain", 0.86, "Modulation Gain")
 var BASE = flag.Float64("base", 500, "Base Hz")
+var RAND = flag.Float64("base_rand", 100, "Random addition to Base Hz")
 var STEP = flag.Float64("step", 4, "Tone Step Hz")
 
 var MODE = flag.String("mode", "nested", "nested | ")
 
 func main() {
 	flag.Parse()
+	r := *RAND * rand.Float64()
+	base := r + *BASE
+	log.Printf("base: %.1f", base)
 
 	tg := ToneGen{
 		SampleRate: *RATE,
 		ToneLen:    *SECS,
 		RampLen:    *RAMP,
-		BaseHz:     *BASE,
+		BaseHz:     base,
 		StepHz:     *STEP,
 	}
 
