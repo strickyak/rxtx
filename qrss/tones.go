@@ -1,7 +1,9 @@
 package qrss
 
 import (
+	"crypto/rand"
 	"math"
+	"math/big"
 )
 
 type Volt float64
@@ -92,4 +94,12 @@ func VoltsToS16be(vv []Volt, gain float64) []byte {
 
 	}
 	return z
+}
+
+func Random(n int) int {
+	r, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		panic(err)
+	}
+	return int(r.Int64())
 }

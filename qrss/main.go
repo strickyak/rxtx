@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 )
 import . "github.com/strickyak/rxtx/qrss"
@@ -25,9 +24,12 @@ var MODE = flag.String("mode", "nested", "nested | ")
 
 func main() {
 	flag.Parse()
-	r := *RAND * rand.Float64()
-	base := r + *BASE
-	log.Printf("base: %.1f", base)
+	var r int
+	if *RAND > 0 {
+		r = Random(int(*RAND))
+	}
+	base := float64(r) + *BASE
+	log.Printf("base: %f", base)
 
 	tg := ToneGen{
 		SampleRate: *RATE,
