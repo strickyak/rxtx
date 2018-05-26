@@ -51,15 +51,11 @@ func main() {
 	case "chevron":
 		down := tg.Boop(2, -1)
 		w.Write(VoltsToS16be(down, *GAIN))
-		w.Write(VoltsToS16be(down, *GAIN))
-		w.Write(VoltsToS16be(down, *GAIN))
 
 		word := tg.Play(ExpandWord(W6REK))
 		w.Write(VoltsToS16be(word, *GAIN))
 
 		up := tg.Boop(-1, 2)
-		w.Write(VoltsToS16be(up, *GAIN))
-		w.Write(VoltsToS16be(up, *GAIN))
 		w.Write(VoltsToS16be(up, *GAIN))
 
 	default:
