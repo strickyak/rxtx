@@ -2,6 +2,7 @@ package qrss
 
 import (
 	"crypto/rand"
+	"io"
 	"math"
 	"math/big"
 )
@@ -24,17 +25,14 @@ func (tg ToneGen) RampTicks() float64 {
 	return tg.SampleRate * tg.RampLen
 }
 
-func (tg ToneGen) Play(tones []Tone) []Volt {
-	var z []Volt
+func (tg ToneGen) Play(tones []Tone, vv chan Volt) {
 	for _, b := range tones {
-		z = append(z, tg.Boop(b, b)...)
+		tg.Boop(b, b, vv)
 	}
-	return z
 }
 
 // Notice Boop(0) produces silence.
-func (tg ToneGen) Boop(tone1, tone2 Tone) []Volt {
-	var z []Volt
+func (tg ToneGen) Boop(tone1, tone2 Tone, vv chan Volt) {
 	hz1 := tg.BaseHz + float64(tone1)*tg.StepHz
 	hz2 := tg.BaseHz + float64(tone2)*tg.StepHz
 	wholeTicks := int(tg.WholeTicks())
@@ -44,7 +42,7 @@ func (tg ToneGen) Boop(tone1, tone2 Tone) []Volt {
 		hz := hz1 + float64(hz2-hz1)*portion
 
 		if tone1 == 0 && !*WITH_TAILS {
-			z = append(z, Volt(0.0))
+			vv <- Volt(0.0)
 			continue
 		}
 
@@ -70,30 +68,35 @@ func (tg ToneGen) Boop(tone1, tone2 Tone) []Volt {
 
 		theta := float64(t) * hz * (2.0 * math.Pi) / tg.SampleRate
 		v := gain * math.Sin(theta)
-		z = append(z, Volt(v))
+		vv <- Volt(v)
 	}
-	return z
 }
 
 const MaxShort = 0x7FFF
 
-func VoltsToS16be(vv []Volt, gain float64) []byte {
-	var z []byte
-	for i := 0; i < len(vv); i++ {
-		v := gain * float64(vv[i])
+func EmitVolts(vv chan Volt, gain float64, w io.Writer, done chan bool) {
+	for {
+		volt, ok := <-vv
+		if !ok {
+			break
+		}
+		y := gain * float64(volt)
 		// Clip at +/- 1 unit.
-		if v > 1.0 {
-			v = 1.0
+		if y > 1.0 {
+			y = 1.0
 		}
-		if v < -1.0 {
-			v = -1.0
+		if y < -1.0 {
+			y = -1.0
 		}
-		short := int(MaxShort * v)
+		yShort := int(MaxShort * y)
 
-		z = append(z, byte(255&(short>>8)), byte(255&short))
-
+		buf := []byte{
+			byte(255 & (yShort >> 8)),
+			byte(255 & yShort),
+		}
+		w.Write(buf)
 	}
-	return z
+	done <- true
 }
 
 func Random(n int) int {
