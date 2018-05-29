@@ -42,10 +42,11 @@ func main() {
 	w := bufio.NewWriter(os.Stdout)
 	done := make(chan bool)
 	vv := make(chan Volt, 42)
-	go EmitVolts(vv, *GAIN, w, done)
+	go EmitVolts(vv, *GAIN, w, done) // Consume channel vv of volts, writing stdout.
 
+	// Produce on channel vv of volts.
 	switch *MODE {
-	case "nested":
+	case "nested": // Experimental.
 		fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(W6REK))
 		fmt.Fprintf(os.Stderr, "%v\n", ExpandWord(W6REK))
 		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandNested(W6REK)))
@@ -53,16 +54,16 @@ func main() {
 
 		tg.Play(ExpandNested(W6REK), vv)
 
-	case "chevron":
-		tg.Boop(2, -1, vv)
+	case "chevron": // Standard.
+		tg.Boop(2, -1, vv) // Descending tone, from level 2 to level -1.
 		tg.Play(ExpandWord(W6REK), vv)
-		tg.Boop(-1, 2, vv)
+		tg.Boop(-1, 2, vv) // Ascending tone, from level -1 to level 2.
 
 	default:
 		panic(*MODE)
 	}
 
 	close(vv)
-	<-done
+	<-done // Wait for EmitVolts to finish.
 	w.Flush()
 }

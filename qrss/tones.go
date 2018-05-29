@@ -17,63 +17,76 @@ type ToneGen struct {
 	StepHz     float64
 }
 
+// How many ticks (at the SampleRate) are in a whole tone (time length ToneLen).
 func (tg ToneGen) WholeTicks() float64 {
 	return tg.SampleRate * tg.ToneLen
 }
 
+// How many ticks (at the SampleRate) are in the raised-cosine-RampUp/RampDown time (time length RampLen).
 func (tg ToneGen) RampTicks() float64 {
 	return tg.SampleRate * tg.RampLen
 }
 
+// Turn a sequence of tones into voltage samples.  Special case Tone 0 creates a gap (silence) of whole tone length.
 func (tg ToneGen) Play(tones []Tone, vv chan Volt) {
 	for _, b := range tones {
 		tg.Boop(b, b, vv)
 	}
 }
 
-// Notice Boop(0) produces silence.
+// Boop writes voltages in range [-1.0, +1.0] to the channel vv, for tones sliding from tone1 to tone2, which might be the same tone.
+// Notice Boop(0, _, _) produces silence.
 func (tg ToneGen) Boop(tone1, tone2 Tone, vv chan Volt) {
 	hz1 := tg.BaseHz + float64(tone1)*tg.StepHz
 	hz2 := tg.BaseHz + float64(tone2)*tg.StepHz
+
 	wholeTicks := int(tg.WholeTicks())
 	for t := 0; t < wholeTicks; t++ {
-
-		portion := float64(t) / float64(wholeTicks)
-		hz := hz1 + float64(hz2-hz1)*portion
-
-		if tone1 == 0 && !*WITH_TAILS {
+		if tone1 == 0 {
 			vv <- Volt(0.0)
 			continue
 		}
 
-		var gain float64
+		// Portion ranges 0.0 to almost 1.0.
+		portion := float64(t) / float64(wholeTicks)
+		// Interpolate part of the way between hz1 and hz2.
+		hz := hz1 + portion*(hz2-hz1)
+
+		// Apply a raised-cosine envelope to the first and last RampTicks ticks.
+		var envelopeGain float64
 		switch {
-		case t < int(tg.RampTicks()):
+		case t < int(tg.RampTicks()): // First RampTicks, gain goes from 0.0 to 1.0
 			{
 				x := (float64(t) / tg.RampTicks()) * math.Pi
 				y := math.Cos(x)
-				gain = 0.5 - y/2.0
+				envelopeGain = 0.5 - y/2.0
 			}
-		case int(tg.WholeTicks())-t < int(tg.RampTicks()):
+		case int(tg.WholeTicks())-t < int(tg.RampTicks()): // Last RampTicks, gain goes from 1.0 to 0.0.
 			{
 				x := ((tg.WholeTicks() - float64(t)) / tg.RampTicks()) * math.Pi
 				y := math.Cos(x)
-				gain = 0.5 - y/2.0
+				envelopeGain = 0.5 - y/2.0
 			}
-		default:
+		default: // Middle of the Boop has full envelopeGain 1.0.
 			{
-				gain = 1.0
+				envelopeGain = 1.0
 			}
 		}
 
+		// The angle theta depends on the ticks and the frequency hz.
 		theta := float64(t) * hz * (2.0 * math.Pi) / tg.SampleRate
-		v := gain * math.Sin(theta)
+		// Take the sin of the angle, and multiply by the envelopeGain.
+		v := envelopeGain * math.Sin(theta)
 		vv <- Volt(v)
 	}
 }
 
 const MaxShort = 0x7FFF
 
+// EmitVolts consumes the volts from the channel vv, which use range [-1.0, +1.0].
+// It multiplies by an overall gain, converts to signed int16, and writes to the writer in big-endian format.
+// When the input volts channel has no more, we write true to the done channel,
+// so the main program can exit.
 func EmitVolts(vv chan Volt, gain float64, w io.Writer, done chan bool) {
 	for {
 		volt, ok := <-vv
