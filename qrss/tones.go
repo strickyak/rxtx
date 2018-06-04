@@ -28,9 +28,15 @@ func (tg ToneGen) RampTicks() float64 {
 }
 
 // Turn a sequence of tones into voltage samples.  Special case Tone 0 creates a gap (silence) of whole tone length.
-func (tg ToneGen) Play(tones []Tone, vv chan Volt) {
+func (tg ToneGen) PlayTones(tones []Tone, vv chan Volt) {
 	for _, b := range tones {
 		tg.Boop(b, b, vv)
+	}
+}
+
+func (tg ToneGen) PlayTonePairs(tonePairs []TonePair, vv chan Volt) {
+	for _, p := range tonePairs {
+		tg.Boop(p.A, p.B, vv)
 	}
 }
 

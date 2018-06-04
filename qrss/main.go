@@ -20,7 +20,8 @@ var BASE = flag.Float64("base", 500, "Base Hz")
 var RAND = flag.Float64("base_rand", 100, "Random addition to Base Hz")
 var STEP = flag.Float64("step", 4, "Tone Step Hz")
 
-var MODE = flag.String("mode", "chevron", "nested | chevron")
+var MODE = flag.String("mode", "chevron", "nested | chevron | slanted")
+var TAG = flag.String("tag", "w6rek", "w6rek | w6rek/4/atl")
 
 func main() {
 	flag.Parse()
@@ -30,6 +31,16 @@ func main() {
 	}
 	base := float64(r) + *BASE
 	log.Printf("base: %f", base)
+
+	var tag []string
+	switch *TAG {
+	case "w6rek":
+		tag = W6REK
+	case "w6rek/4/atl":
+		tag = W6REK_4_ATL
+	default:
+		panic("Bad tag")
+	}
 
 	tg := ToneGen{
 		SampleRate: *RATE,
@@ -47,17 +58,20 @@ func main() {
 	// Produce on channel vv of volts.
 	switch *MODE {
 	case "nested": // Experimental.
-		fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(W6REK))
-		fmt.Fprintf(os.Stderr, "%v\n", ExpandWord(W6REK))
-		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandNested(W6REK)))
-		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandWord(W6REK)))
+		fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(tag))
+		fmt.Fprintf(os.Stderr, "%v\n", ExpandWord(tag))
+		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandNested(tag)))
+		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandWord(tag)))
 
-		tg.Play(ExpandNested(W6REK), vv)
+		tg.PlayTones(ExpandNested(tag), vv)
 
 	case "chevron": // Standard.
 		tg.Boop(2, -1, vv) // Descending tone, from level 2 to level -1.
-		tg.Play(ExpandWord(W6REK), vv)
+		tg.PlayTones(ExpandWord(tag), vv)
 		tg.Boop(-1, 2, vv) // Ascending tone, from level -1 to level 2.
+
+	case "slanted": // Standard.
+		tg.PlayTonePairs(SlantedExpandWord(tag), vv)
 
 	default:
 		panic(*MODE)

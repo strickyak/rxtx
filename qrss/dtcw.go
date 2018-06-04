@@ -4,7 +4,7 @@ import (
 	"log"
 )
 
-type Tone int16
+type Tone float64
 
 var W = ".--"
 var SIX = "-...."
@@ -12,7 +12,14 @@ var R = ".-."
 var E = "."
 var K = "-.-"
 
+var SLASH = "-..-."
+var FOUR = "....-"
+var A = ".-"
+var T = "-"
+var L = ".-.."
+
 var W6REK = []string{W, SIX, R, E, K}
+var W6REK_4_ATL = []string{W, SIX, R, E, K, SLASH, FOUR, SLASH, A, T, L}
 
 // ExpandLetter outputs a list of tones: 1 for a dit, 2 for a dah, or 0 for a gap.
 func ExpandLetter(s string, final bool) []Tone {
