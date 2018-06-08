@@ -30,7 +30,7 @@ func Pixel(ascii byte, row int, col int) bool {
 	if row < 0 || row > 7 {
 		log.Panicf("Expected 0 <= row <= 7; got row=%d", row)
 	}
-	if col < 0 || col > 7 {
+	if col < 0 || col > 4 {
 		log.Panicf("Expected 0 <= col <= 4; got col=%d", col)
 	}
 	if ascii < 32 || ascii > 127 {
