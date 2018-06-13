@@ -66,12 +66,17 @@ func main() {
 		tg.PlayTones(ExpandNested(tag), vv)
 
 	case "chevron": // Standard.
-		tg.Boop(2, -1, vv) // Descending tone, from level 2 to level -1.
+		tg.Boop(2, -1, FadeEnd(0), vv) // Descending tone, from level 2 to level -1.
 		tg.PlayTones(ExpandWord(tag), vv)
-		tg.Boop(-1, 2, vv) // Ascending tone, from level -1 to level 2.
+		tg.Boop(-1, 2, FadeEnd(0), vv) // Ascending tone, from level -1 to level 2.
 
-	case "slanted": // Standard.
+	case "slanted":
 		tg.PlayTonePairs(SlantedExpandWord(tag), vv)
+
+	case "neo":
+		tg.PlayTonePairs(NeoExpandWord(tag), vv)
+	case "duo":
+		tg.PlayTonePairs(DuoExpandWord(tag), vv)
 
 	default:
 		panic(*MODE)
