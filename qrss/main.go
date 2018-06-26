@@ -39,7 +39,7 @@ func main() {
 	case "w6rek/4/atl":
 		tag = W6REK_4_ATL
 	default:
-		panic("Bad tag")
+		tag = W6REK
 	}
 
 	tg := ToneGen{
@@ -80,7 +80,8 @@ func main() {
 	case "jots":
 		PrintJots(J_W6REK)
 		tg.PlayTonePairs(JotsExpandWord(J_W6REK), vv)
-
+	case "raster":
+		tg.PlayTonePairs(RasterExpandWord(*TAG), vv)
 	default:
 		panic(*MODE)
 	}
