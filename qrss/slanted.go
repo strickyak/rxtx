@@ -6,9 +6,12 @@ import (
 
 type FadeEnd byte
 
-const Both = FadeEnd(0)
-const Left = FadeEnd(1)
-const Right = FadeEnd(2)
+const (
+	Both = FadeEnd(iota)
+	Left
+	Right
+	Silent
+)
 
 type TonePair struct {
 	A, B Tone

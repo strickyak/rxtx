@@ -17,7 +17,7 @@ var SECS = flag.Float64("secs", 6, "Tone length in secs")
 var RAMP = flag.Float64("ramp", 1.0, "Ramp up/down time in secs")
 var GAIN = flag.Float64("gain", 0.86, "Modulation Gain")
 var BASE = flag.Float64("base", 500, "Base Hz")
-var RAND = flag.Float64("base_rand", 100, "Random addition to Base Hz")
+var RAND = flag.Float64("base_rand", 0, "Random addition to Base Hz")
 var STEP = flag.Float64("step", 4, "Tone Step Hz")
 
 var MODE = flag.String("mode", "chevron", "nested | chevron | slanted")
@@ -77,6 +77,9 @@ func main() {
 		tg.PlayTonePairs(NeoExpandWord(tag), vv)
 	case "duo":
 		tg.PlayTonePairs(DuoExpandWord(tag), vv)
+	case "jots":
+		PrintJots(J_W6REK)
+		tg.PlayTonePairs(JotsExpandWord(J_W6REK), vv)
 
 	default:
 		panic(*MODE)
