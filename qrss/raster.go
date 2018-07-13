@@ -1,8 +1,24 @@
 package qrss
 
 import (
+	"fmt"
 	font "github.com/strickyak/rxtx/font5x7"
+	"log"
 )
+
+func RasterPrintLetter(a rune) {
+	for c := 0; c < 5; c++ {
+		for r := 6; r >= 0; r-- {
+			if font.Pixel(byte(a), r, c) {
+				fmt.Printf("#")
+			} else {
+				fmt.Printf(" ")
+			}
+		}
+		fmt.Printf("\n")
+	}
+	fmt.Printf("--------\n")
+}
 
 func RasterExpandLetter(a rune) []TonePair {
 	var z []TonePair
@@ -15,10 +31,12 @@ func RasterExpandLetter(a rune) []TonePair {
 			}
 		}
 	}
+	log.Printf("[%c]", a)
 	return z
 }
 
 func RasterExpandWord(s string) []TonePair {
+	log.Printf("<%s>", s)
 	var z []TonePair
 	for i, a := range s {
 		if i != 0 {

@@ -1,6 +1,7 @@
 // +build main
 
 // go run main.go | pacat --format=s16be --channels=1 --channel-map=mono  --rate=44100 --device=alsa_output.usb-Burr-Brown_from_TI_USB_Audio_CODEC-00.analog-stereo
+// go run main.go --mode=raster --tag=hope --rate=44100 --secs=2 --ramp=0.1 | pacat --format=s16be --channels=1 --channel-map=mono  --rate=44100
 package main
 
 import (
@@ -38,6 +39,9 @@ func main() {
 		tag = W6REK
 	case "w6rek/4/atl":
 		tag = W6REK_4_ATL
+	case "hope":
+		tag = W2H
+		*TAG = "hackers W*H on W*H planet W*H earth W*H hope.net W*H DE W6REK "
 	default:
 		tag = W6REK
 	}

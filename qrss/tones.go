@@ -3,7 +3,7 @@ package qrss
 import (
 	"crypto/rand"
 	"io"
-	"log"
+	//"log"
 	"math"
 	"math/big"
 )
@@ -58,7 +58,7 @@ func (tg ToneGen) Boop(tone1, tone2 Tone, fe FadeEnd, vv chan Volt) {
 		portion := float64(t) / float64(wholeTicks)
 		// Interpolate part of the way between hz1 and hz2.
 		hz := hz1 + portion*(hz2-hz1)
-		log.Printf("%06d: %8.0f hz (%5.1f, %5.1f)", t, hz, tone1, tone2)
+		// log.Printf("%06d: %8.0f hz (%5.1f, %5.1f)", t, hz, tone1, tone2)
 
 		// Apply a raised-cosine envelope to the first and last RampTicks ticks.
 		var envelopeGain float64

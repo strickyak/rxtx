@@ -1,4 +1,4 @@
-alias rig="exec rigctl -m 229 -r /dev/ttyUSB0 -s 38400"
+alias rig="rigctl -m 229 -r /dev/ttyUSB0 -s 38400"
 
 while true
 do

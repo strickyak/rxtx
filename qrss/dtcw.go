@@ -17,9 +17,13 @@ var FOUR = "....-"
 var A = ".-"
 var T = "-"
 var L = ".-.."
+var TWO = "..---"
+var H = "...."
 
 var W6REK = []string{W, SIX, R, E, K}
 var W6REK_4_ATL = []string{W, SIX, R, E, K, SLASH, FOUR, SLASH, A, T, L}
+
+var W2H = []string{W, TWO, H}
 
 // ExpandLetter outputs a list of tones: 1 for a dit, 2 for a dah, or 0 for a gap.
 func ExpandLetter(s string, final bool) []Tone {
