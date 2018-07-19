@@ -2,6 +2,8 @@
 
 // go run main.go | pacat --format=s16be --channels=1 --channel-map=mono  --rate=44100 --device=alsa_output.usb-Burr-Brown_from_TI_USB_Audio_CODEC-00.analog-stereo
 // go run main.go --mode=raster --tag=hope --rate=44100 --secs=2 --ramp=0.1 | pacat --format=s16be --channels=1 --channel-map=mono  --rate=44100
+// go run main.go --mode=slashup --tag=w2h --rate=44100  --secs=1 --ramp=0.1 --step=100 | pacat --format=s16be --channels=1 --channel-map=mono  --rate=44100
+
 package main
 
 import (
@@ -40,6 +42,7 @@ func main() {
 	case "w6rek/4/atl":
 		tag = W6REK_4_ATL
 	case "hope":
+	case "w2h":
 		tag = W2H
 		*TAG = "hackers W*H on W*H planet W*H earth W*H hope.net W*H DE W6REK "
 	default:
@@ -61,7 +64,7 @@ func main() {
 
 	// Produce on channel vv of volts.
 	switch *MODE {
-	case "nested": // Experimental.
+	case "nested":
 		fmt.Fprintf(os.Stderr, "%v\n", ExpandNested(tag))
 		fmt.Fprintf(os.Stderr, "%v\n", ExpandWord(tag))
 		fmt.Fprintf(os.Stderr, "%v\n", len(ExpandNested(tag)))
@@ -69,10 +72,27 @@ func main() {
 
 		tg.PlayTones(ExpandNested(tag), vv)
 
-	case "chevron": // Standard.
-		tg.Boop(2, -1, FadeEnd(0), vv) // Descending tone, from level 2 to level -1.
+	case "chevron":
+		tg.Boop(2, -1, Both, vv) // Descending tone, from level 2 to level -1.
 		tg.PlayTones(ExpandWord(tag), vv)
-		tg.Boop(-1, 2, FadeEnd(0), vv) // Ascending tone, from level -1 to level 2.
+		tg.Boop(-1, 2, Both, vv) // Ascending tone, from level -1 to level 2.
+
+	case "slashup": // e.g. "W/2/H" e.g. "_--/__---/____"
+		for i, didahs := range tag {
+			if i > 0 {
+				tg.Boop(0.5, 2.5, Both, vv) // Ascending tone
+			}
+			for _, d := range didahs {
+				switch d {
+				case '.':
+					tg.Boop(1, 1, Both, vv)
+				case '-':
+					tg.Boop(2, 2, Both, vv)
+				default:
+					panic("WUT:" + didahs)
+				}
+			}
+		}
 
 	case "slanted":
 		tg.PlayTonePairs(SlantedExpandWord(tag), vv)
