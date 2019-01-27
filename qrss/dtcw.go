@@ -21,6 +21,7 @@ var TWO = "..---"
 var H = "...."
 
 var W6REK = []string{W, SIX, R, E, K}
+var W6REK_4 = []string{W, SIX, R, E, K, SLASH, FOUR}
 var W6REK_4_ATL = []string{W, SIX, R, E, K, SLASH, FOUR, SLASH, A, T, L}
 
 var W2H = []string{W, TWO, H}

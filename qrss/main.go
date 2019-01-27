@@ -39,12 +39,17 @@ func main() {
 	switch *TAG {
 	case "w6rek":
 		tag = W6REK
+	case "w6rek/4":
+		tag = W6REK_4
 	case "w6rek/4/atl":
 		tag = W6REK_4_ATL
 	case "hope":
 	case "w2h":
 		tag = W2H
 		*TAG = "hackers W*H on W*H planet W*H earth W*H hope.net W*H DE W6REK "
+	case "hny":
+		*TAG = "HappyNewYear EM91nx W6REK/4 Pax"
+		*MODE = "raster"
 	default:
 		tag = W6REK
 	}
